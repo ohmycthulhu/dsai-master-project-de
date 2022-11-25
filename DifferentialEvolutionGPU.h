@@ -91,7 +91,7 @@ void gpuAssert(cudaError_t code, const char *file, int line);
 // @param F - the scaling factor used by DE (see DE paper for more info)
 // @param costArgs - this a set of any arguments needed to be passed to the cost function. (must be in device memory already)
 // @param h_output - the host output vector of function
-void differentialEvolution(float *d_target,
+float differentialEvolution(float *d_target,
                            float *d_trial,
                            float *d_cost,
                            float *d_target2,

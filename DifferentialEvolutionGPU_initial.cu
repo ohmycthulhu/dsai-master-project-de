@@ -225,17 +225,16 @@ __global__ void evolutionKernel(float *d_target,
     do { a = curand(state) % popSize; } while (a == idx);
     do { b = curand(state) % popSize; } while (b == idx || b == a);
     do { c = curand(state) % popSize; } while (c == idx || c == a || c == b);
-    j = curand(state) % dim;
-    
+
+    mutateIndx = curand(state) % dim;
     ///////////////////// MUTATION ////////////////
     for (int k = 1; k <= dim; k++) {
-        if ((curand(state) % 1000) < CR || k==dim) {
+        if ((curand(state) % 1000) < CR || k == mutateIndx) {
             // trial vector param comes from vector plus weighted differential
-            d_trial[(idx*dim)+j] = d_target[(a*dim)+j] + (F * (d_target[(b*dim)+j] - d_target[(c*dim)+j]));
+            d_trial[(idx*dim)+k] = d_target[(a*dim)+k] + (F * (d_target[(b*dim)+k] - d_target[(c*dim)+k]));
         } else {
-            d_trial[(idx*dim)+j] = d_target[(idx*dim)+j];
+            d_trial[(idx*dim)+k] = d_target[(idx*dim)+k];
         } // end if else for creating trial vector
-        j = (j+1) % dim;
     } // end for loop through parameters
     
     float score = costFunc(&d_trial[idx*dim], costArgs);
@@ -273,7 +272,7 @@ __global__ void evolutionKernel(float *d_target,
 // @param F - the scaling factor used by DE (see DE paper for more info)
 // @param costArgs - this a set of any arguments needed to be passed to the cost function. (must be in device memory already)
 // @param h_output - the host output vector of function
-void differentialEvolution(float *d_target,
+float differentialEvolution(float *d_target,
                            float *d_trial,
                            float *d_cost,
                            float *d_target2,
@@ -291,36 +290,13 @@ void differentialEvolution(float *d_target,
 {
     cudaError_t ret;
     int power32 = ceil(popSize / 32.0) * 32;
-    //std::cout << "power32 = " << power32 << std::endl;
-    
-    //std::cout << "min bounds = ";
-    //printCudaVector(d_min, dim);
-    //std::cout << "max bounds = ";
-    //printCudaVector(d_max, dim);
-    
-    //std::cout << "Random vector" << std::endl;
-    //printCudaVector(d_target, popSize*dim);
-    //std::cout << "About to create random vecto" << std::endl;
-    
+
     // generate random vector
     generateRandomVectorAndInit<<<1, power32>>>(d_target, d_min, d_max, d_cost,
                     costArgs, (curandState_t *)randStates, popSize, dim, clock());
     gpuErrorCheck(cudaPeekAtLastError());
-    //udaMemcpy(d_target2, d_target, sizeof(float) * dim * popSize, cudaMemcpyDeviceToDevice);
-    
-    //std::cout << "Generayed random vector" << std::endl;
-    
-    //printCudaVector(d_target, popSize*dim);
-    //std::cout << "printing cost vector" << std::endl;
-    //printCudaVector(d_cost, popSize);
-    
+
     for (int i = 1; i <= maxGenerations; i++) {
-        //std::cout << i << ": generation = \n";
-        //printCudaVector(d_target, popSize * dim);
-        //std::cout << "cost = ";
-        //printCudaVector(d_cost, popSize);
-        //std::cout << std::endl;
-        
         // start kernel for this generation
         evolutionKernel<<<1, power32>>>(d_target, d_trial, d_cost, d_target2, d_min, d_max,
                 (curandState_t *)randStates, dim, popSize, CR, F, costArgs);
@@ -336,29 +312,17 @@ void differentialEvolution(float *d_target,
     gpuErrorCheck(ret);
     ret = cudaMemcpy(h_cost, d_cost, popSize * sizeof(float), cudaMemcpyDeviceToHost);
     gpuErrorCheck(ret);
-    //std::cout << "h_cost = {";
-    
+
     // find min of last evolutions
-    int bestIdx = -1;
     float bestCost = FLT_MAX;
     for (int i = 0; i < popSize; i++) {
         float curCost = h_cost[i];
-        //std::cout << curCost << ", ";
         if (curCost <= bestCost) {
             bestCost = curCost;
-            bestIdx = i;
         }
     }
-    //std::cout << "}" << std::endl;
-    
-    //std::cout << "\n\n agents = ";
-    //printCudaVector(d_target, popSize*dim);
-    
-    //std::cout << "Best cost = " << bestCost << " bestIdx = " << bestIdx << std::endl;
-    
-    // output best minimization.
-    ret = cudaMemcpy(h_output, d_target+(bestIdx*dim), sizeof(float)*dim, cudaMemcpyDeviceToHost);
-    gpuErrorCheck(ret);
+
+    return bestCost;
 }
 
 // allocate the memory needed for random number generators.

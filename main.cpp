@@ -30,7 +30,7 @@
 #include <vector>
 #include <cuda_runtime.h>
 
-std::vector<float> executeDE(const size_t dim) {
+std::vector<float> executeDE(const size_t dim, float* cost) {
     // create the min and max bounds for the search space.
     float minBounds[2] = {-50, -50};
     float maxBounds[2] = {100, 200};
@@ -53,7 +53,7 @@ std::vector<float> executeDE(const size_t dim) {
     
     gpuErrorCheck(cudaMemcpy(d_x, (void *)&x, sizeof(struct data), cudaMemcpyHostToDevice));
 
-    return minimizer.fmin(d_x);
+    return minimizer.fmin(d_x, cost);
 }
 
 template<typename T>
@@ -80,11 +80,12 @@ int main(int argc, char** argv)
     }
 
     std::vector<float> result;
+    float cost;
     std::chrono::time_point<std::chrono::system_clock> start, end;
     if (sample_size > 1) {
         std::cout << "Execution results:" << std::endl;
 
-        std::cout << "t" << "\t";
+        std::cout << "t" << "\t" << "C" << "\t";
         for (int i = 0; i < dim; i++) {
             std::cout << "x_" << i << "\t";
         }
@@ -92,16 +93,19 @@ int main(int argc, char** argv)
 
         for (int i = 0; i < sample_size; i++) {
             start = std::chrono::high_resolution_clock::now();
-            result = executeDE(dim);
+            result = executeDE(dim, &cost);
             end = std::chrono::high_resolution_clock::now();
             
             std::cout << (end - start).count() << "\t";
-            
+            std::cout << cost << "\t";
+
             print_vector(result, dim, "\t");
         }
     } else {
-        result = executeDE(dim);
+        result = executeDE(dim, &cost);
         print_vector(result, dim);
+
+        std::cout << "Best cost: " << cost << std::endl;
     }
 
     // get the result from the minimizer
