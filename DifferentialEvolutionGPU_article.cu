@@ -99,7 +99,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
 __host__ __device__ float quadraticFunc(const float *vec, const void *args)
 {
     float x = vec[0]-3;
-    
+
     float y = vec[1];
     return (x*x) + (y*y);
 }
@@ -107,10 +107,10 @@ __host__ __device__ float quadraticFunc(const float *vec, const void *args)
 __host__ __device__ float costWithArgs(const float *vec, const void *args)
 {
     const struct data *a = (struct data *)args;
-    
+
     float x = vec[0];
     float y = vec[1];
-    
+
     return x*x + y*y + 9 - (6*x) + a->arr[1] + a->v;
 }
 
@@ -153,17 +153,18 @@ __host__ __device__ float costFunc(const float *vec, const void *args) {
 }
 
 
-void printCudaVector(float *d_vec, int size)
+template <typename T>
+void printCudaVector(T *d_vec, int size)
 {
-    float *h_vec = new float[size];
-    gpuErrorCheck(cudaMemcpy(h_vec, d_vec, sizeof(float) * size, cudaMemcpyDeviceToHost));
+    T *h_vec = new T[size];
+    gpuErrorCheck(cudaMemcpy(h_vec, d_vec, sizeof(T) * size, cudaMemcpyDeviceToHost));
 
     std::cout << "{";
     for (int i = 0; i < size; i++) {
         std::cout << h_vec[i] << ", ";
     }
     std::cout << "}" << std::endl;
-    
+
     delete[] h_vec;
 }
 
@@ -173,7 +174,7 @@ __global__ void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_m
 {
     int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
     if (idx >= popSize) return;
-    
+
     curandState_t *state = &randStates[idx];
     curand_init(seed, idx,0,state);
     for (int i = 0; i < dim; i++) {
@@ -183,15 +184,44 @@ __global__ void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_m
     d_cost[idx] = costFunc(&d_x[idx*dim], costArgs);
 }
 
+/*
+ * Generates 3 non-equal indices for usage in the mutation
+ * @param popSize - the population size
+ * @param randStates - an array of random number generator states. Array created using createRandNumGen function
+ * @param output - a device array used for output
+ */
+__global__ void generateMutationIndices(
+        int popSize,
+        curandState_t *randStates,
+        size_t* output
+) {
+    int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    curandState_t *state = &randStates[idx];
+
+    int a;
+    int b;
+    int c;
+    //////////////////// Random index mutation generation //////////////////
+    // select a different random number then index
+    do { a = curand(state) % popSize; } while (a == idx);
+    do { b = curand(state) % popSize; } while (b == idx || b == a);
+    do { c = curand(state) % popSize; } while (c == idx || c == a || c == b);
+
+    output[idx * 3] = a;
+    output[idx * 3 + 1] = b;
+    output[idx * 3 + 2] = c;
+}
 
 // This function handles the entire differentialEvolution, and calls the needed kernel functions.
 // @param d_target - a device array with the current agents parameters (requires array with size popSize*dim)
 // @param d_trial - a device array with size popSize*dim (worthless outside of function)
 // @param d_cost - a device array with the costs of the last generation afterwards size: popSize
 // @param d_target2 - a device array with size popSize*dim (worthless outside of function)
+// @param mutationIndices - a device array with indices for mutation
 // @param d_min - a list of the minimum values for the set of parameters (size = dim)
 // @param d_max - a list of the maximum values for the set of parameters (size = dim)
-// @param randStates - an array of random number generator states. Array created using createRandNumGen funtion
+// @param randStates - an array of random number generator states. Array created using createRandNumGen function
 // @param dim - the number of dimensions the equation being minimized has.
 // @param popSize - this the population size for DE, or otherwise the number of agents that DE will use. (see DE paper for more info)
 // @param CR - Crossover Constant used by DE (see DE paper for more info)
@@ -201,6 +231,7 @@ __global__ void evolutionKernel(float *d_target,
                                 float *d_trial,
                                 float *d_cost,
                                 float *d_target2,
+                                size_t *mutationIndices,
                                 float *d_min,
                                 float *d_max,
                                 curandState_t *randStates,
@@ -214,18 +245,12 @@ __global__ void evolutionKernel(float *d_target,
     if (idx >= popSize) return; // stop executing this block if
                                 // all populations have been used
     curandState_t *state = &randStates[idx];
-    
-    // TODO: Better way of generating unique random numbers?
-    int a;
-    int b;
-    int c;
-    int j;
-    //////////////////// Random index mutation generation //////////////////
-    // select a different random number then index
-    do { a = curand(state) % popSize; } while (a == idx);
-    do { b = curand(state) % popSize; } while (b == idx || b == a);
-    do { c = curand(state) % popSize; } while (c == idx || c == a || c == b);
 
+    int a = mutationIndices[idx * 3];
+    int b = mutationIndices[idx * 3 + 1];
+    int c = mutationIndices[idx * 3 + 2];
+
+    int j;
     int mutateIndx = curand(state) % dim;
     ///////////////////// MUTATION ////////////////
     for (int k = 1; k <= dim; k++) {
@@ -236,7 +261,7 @@ __global__ void evolutionKernel(float *d_target,
             d_trial[(idx*dim)+k] = d_target[(idx*dim)+k];
         } // end if else for creating trial vector
     } // end for loop through parameters
-    
+
     float score = costFunc(&d_trial[idx*dim], costArgs);
     if (score < d_cost[idx]) {
         // copy trial into new vector
@@ -291,23 +316,40 @@ float differentialEvolution(float *d_target,
     cudaError_t ret;
     int power32 = ceil(popSize / 32.0) * 32;
 
+    // Allocate mutation indices
+    size_t *currentMutationIndices, *nextMutationIndices;
+    cudaMalloc(&currentMutationIndices, sizeof(size_t) * popSize * 3);
+    cudaMalloc(&nextMutationIndices, sizeof(size_t) * popSize * 3);
+
+    cudaStream_t streams[2];
+    cudaStreamCreate(&streams[0]);
+    cudaStreamCreate(&streams[1]);
+
     // generate random vector
-    generateRandomVectorAndInit<<<1, power32>>>(d_target, d_min, d_max, d_cost,
+    generateRandomVectorAndInit<<<1, power32, 0, streams[0]>>>(d_target, d_min, d_max, d_cost,
                     costArgs, (curandState_t *)randStates, popSize, dim, clock());
+    generateMutationIndices<<<1, power32, 0, streams[1]>>>(popSize, (curandState_t *)randStates, currentMutationIndices);
     gpuErrorCheck(cudaPeekAtLastError());
 
     for (int i = 1; i <= maxGenerations; i++) {
         // start kernel for this generation
-        evolutionKernel<<<1, power32>>>(d_target, d_trial, d_cost, d_target2, d_min, d_max,
+        evolutionKernel<<<1, power32, 0, streams[0]>>>(d_target, d_trial, d_cost, d_target2, currentMutationIndices, d_min, d_max,
                 (curandState_t *)randStates, dim, popSize, CR, F, costArgs);
+
+        generateMutationIndices<<<1, power32, 0, streams[1]>>>(popSize, (curandState_t *)randStates, nextMutationIndices);
+
         gpuErrorCheck(cudaPeekAtLastError());
-        
+
         // swap buffers, places newest data into d_target.
-        float *tmp = d_target;
+        float *tmp_target = d_target;
         d_target = d_target2;
-        d_target2 = tmp;
+        d_target2 = tmp_target;
+
+        size_t* tmp_indices = nextMutationIndices;
+        nextMutationIndices = currentMutationIndices;
+        currentMutationIndices = tmp_indices;
     } // end for (generations)
-    
+
     ret = cudaDeviceSynchronize();
     gpuErrorCheck(ret);
     ret = cudaMemcpy(h_cost, d_cost, popSize * sizeof(float), cudaMemcpyDeviceToHost);
