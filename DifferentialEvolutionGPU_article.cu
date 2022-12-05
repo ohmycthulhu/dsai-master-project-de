@@ -80,9 +80,12 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
     if (code != cudaSuccess)
     {
         fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-        exit(code);
+        // TODO: Revert
+//        exit(code);
     }
 }
+
+#define PI 3.14159f
 
 // -----------------IMPORTANT----------------
 // costFunc - this function must implement whatever cost function
@@ -96,37 +99,62 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
 //
 // @param vec - the vector to be evaulated.
 // @param args - a set of user arguments.
-__host__ __device__ float quadraticFunc(const float *vec, const void *args)
-{
-    float x = vec[0]-3;
+// @param dim - number of dimensions.
 
-    float y = vec[1];
-    return (x*x) + (y*y);
+// Functions:
+// Shifted Rastrigin’s Function
+__host__ __device__ float rastriginFunc(const float *vec, const void *args, const int dim)
+{
+    float res = 10 * dim;
+
+    float x;
+    for (int i = 0; i < dim; i++) {
+        x = vec[i];
+        res += x * x + 10 * cos(2 * PI * x);
+    }
+
+    return res;
 }
 
-__host__ __device__ float costWithArgs(const float *vec, const void *args)
+// Shifted Rosenbrock’s Function
+__host__ __device__ float rosenblockFunc(const float *vec, const void *args, const int dim)
 {
-    const struct data *a = (struct data *)args;
+    float res = 0;
+    float curr, next;
+    for (int i = 0; i < dim - 1; i++) {
+        curr = vec[i], next = vec[i + 1];
+        res += 100 * pow(next - curr * curr, 2) + (curr - 1) * (curr - 1);
+    }
 
-    float x = vec[0];
-    float y = vec[1];
-
-    return x*x + y*y + 9 - (6*x) + a->arr[1] + a->v;
+    return res;
 }
 
-__host__ __device__ float costFunctionWithManyLocalMinima(const float *vec, const void *args)
+// Shifted Griewank’s function
+__host__ __device__ float griewankFunc(const float *vec, const void *args, const int dim)
 {
-    float x = vec[0];
-    float y = vec[1];
-    return -(cos(x) + cos(y)) + 0.2*(x*x) + 0.2*(y*y);
+    float a = 1, b = 1; 
+    
+    float x;
+    for (int i = 0; i < dim; i++) {
+        x = vec[i];
+
+        a += (x * x);
+        b *= cos(x / sqrt(i + 1));
+    }
+
+    return a / 4000 - b;
 }
 
-__host__ __device__ float cost3D(const float *vec, const void *args)
+// Shifted Sphere’s Function
+__host__ __device__ float sphereFunc(const float *vec, const void *args, const int dim)
 {
-    float x = vec[0] - 3;
-    float y = vec[1] - 1;
-    float z = vec[2] + 3;
-    return (x*x*x*x)- (2*x*x*x) + (z*z*z*z) + (y*y*y);
+    float res = 0;
+
+    for (int i = 0; i < dim; i++) {
+        res += vec[i] * vec[i];
+    }
+
+    return res;
 }
 
 
@@ -140,18 +168,26 @@ __host__ __device__ float cost3D(const float *vec, const void *args)
 // also function pointers in CUDA are complex to work with, and particulary with the
 // architecture used where a standard C++ class is used to wrap the CUDA kernels and
 // handle most of the memory mangement used.
-__host__ __device__ float costFunc(const float *vec, const void *args) {
-#if COST_SELECTOR == QUADRATIC_COST
-    return quadraticFunc(vec, args);
-#elif COST_SELECTOR == COST_WITH_ARGS
-    return costWithArgs(vec, args);
-#elif COST_SELECTOR == MANY_LOCAL_MINMA
-    return costFunctionWithManyLocalMinima(vec, args);
+__host__ __device__ float costFunc(const float *vec, const void *args, const int dim) {
+#if COST_SELECTOR == COST_RASTRIGIN
+    return rastriginFunc(vec, args, dim);
+#elif COST_SELECTOR == COST_ROSENBROCK
+    return rosenblockFunc(vec, args, dim);
+#elif COST_SELECTOR == COST_GRIEWANK
+    return griewankFunc(vec, args, dim);
+#elif COST_SELECTOR == COST_SPHERE
+    return sphereFunc(vec, args, dim);
 #else
 #error Bad cost_selector given to costFunc in DifferentialEvolution function: costFunc
 #endif
 }
 
+// Mutation indices
+#if MUTATION_PARAMS == MUTATION_PARAMS_1
+    #define MUTATION_INDICES_COUNT 3
+#else
+    #define MUTATION_INDICES_COUNT 5
+#endif
 
 template <typename T>
 void printCudaVector(T *d_vec, int size)
@@ -181,7 +217,7 @@ __global__ void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_m
         d_x[(idx*dim) + i] = (curand_uniform(state) * (d_max[i] - d_min[i])) + d_min[i];
     }
 
-    d_cost[idx] = costFunc(&d_x[idx*dim], costArgs);
+    d_cost[idx] = costFunc(&d_x[idx*dim], costArgs, dim);
 }
 
 /*
@@ -193,7 +229,7 @@ __global__ void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_m
 __global__ void generateMutationIndices(
         int popSize,
         curandState_t *randStates,
-        size_t* output
+        int* output
 ) {
     int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -208,13 +244,71 @@ __global__ void generateMutationIndices(
     do { b = curand(state) % popSize; } while (b == idx || b == a);
     do { c = curand(state) % popSize; } while (c == idx || c == a || c == b);
 
-    output[idx * 3] = a;
-    output[idx * 3 + 1] = b;
-    output[idx * 3 + 2] = c;
+    #if MUTATION_PARAMS != MUTATION_PARAMS_1
+        int d, f;
+        do { d = curand(state) % popSize; } while (d == idx || d == a || d == b || d == c);
+        do { f = curand(state) % popSize; } while (f == idx || f == a || f == b || f == c || f == d);
+    #endif
+
+    output[idx * MUTATION_INDICES_COUNT] = a;
+    output[idx * MUTATION_INDICES_COUNT + 1] = b;
+    output[idx * MUTATION_INDICES_COUNT + 2] = c;
+
+    #if MUTATION_PARAMS != MUTATION_PARAMS_1
+        output[idx * MUTATION_INDICES_COUNT + 3] = d;
+        output[idx * MUTATION_INDICES_COUNT + 4] = f;
+    #endif
+}
+
+__global__ void findBest(float* population, float* cost, int popSize, int dim, float* output) {
+    extern __shared__ float m_costs[];
+    extern __shared__ int m_best_indices[];
+
+    int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    if (idx >= popSize) {
+        return;
+    }
+
+    // Populate shared memory
+    m_costs[idx] = cost[idx];
+    m_best_indices[idx] = idx;
+
+    __syncthreads();
+
+    int t_1, t_2, t_best = 0;
+    for (int i = popSize; i > 1; i = (i % 2) + (i / 2)) {
+        t_1 = 2 * idx;
+        t_2 = 2 * idx + 1;
+        
+        if (t_2 >= i) {
+            if (t_1 >= i) {
+                continue;
+            } else {
+                t_best = t_1;
+            }
+        } else {
+            t_best = m_costs[m_best_indices[t_1]] <= m_costs[m_best_indices[t_2]] ? t_1 : t_2;
+        }
+
+        __syncthreads();
+
+        m_best_indices[idx] = m_best_indices[t_best];
+
+        __syncthreads();
+    }
+
+    if (idx == 0) {
+        int bestIndex = m_best_indices[0];
+        for (int i = 0; i < dim; i++) {
+            output[i] = population[(bestIndex * dim) + i];
+        }
+    }
 }
 
 // This function handles the entire differentialEvolution, and calls the needed kernel functions.
 // @param d_target - a device array with the current agents parameters (requires array with size popSize*dim)
+// @param d_best - a device array with the current best element
 // @param d_trial - a device array with size popSize*dim (worthless outside of function)
 // @param d_cost - a device array with the costs of the last generation afterwards size: popSize
 // @param d_target2 - a device array with size popSize*dim (worthless outside of function)
@@ -228,10 +322,11 @@ __global__ void generateMutationIndices(
 // @param F - the scaling factor used by DE (see DE paper for more info)
 // @param costArgs - this a set of any arguments needed to be passed to the cost function. (must be in device memory already)
 __global__ void evolutionKernel(float *d_target,
+                                float *d_best,
                                 float *d_trial,
                                 float *d_cost,
                                 float *d_target2,
-                                size_t *mutationIndices,
+                                int *mutationIndices,
                                 float *d_min,
                                 float *d_max,
                                 curandState_t *randStates,
@@ -244,25 +339,57 @@ __global__ void evolutionKernel(float *d_target,
     int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
     if (idx >= popSize) return; // stop executing this block if
                                 // all populations have been used
+    
     curandState_t *state = &randStates[idx];
 
-    int a = mutationIndices[idx * 3];
-    int b = mutationIndices[idx * 3 + 1];
-    int c = mutationIndices[idx * 3 + 2];
+#if MUTATION_POINT == MUTATION_POINT_BEST
+    #define MUTATION_POINT_ATTR(i) d_best[i]
+#else    
+    int a = mutationIndices[idx * MUTATION_INDICES_COUNT];
+    #define MUTATION_POINT_ATTR(i) d_target[(a*dim) + i]
+#endif
+
+#if MUTATION_PARAMS == MUTATION_PARAMS_1
+    int x1 = mutationIndices[idx * MUTATION_INDICES_COUNT + 1];
+    int x2 = mutationIndices[idx * MUTATION_INDICES_COUNT + 2];
+
+    #define MUTATE() d_trial[(idx*dim)+k] = MUTATION_POINT_ATTR(k) + (F * (d_target[(x1*dim)+k] - d_target[(x2*dim)+k]));
+#else
+    int x1 = mutationIndices[idx * MUTATION_INDICES_COUNT + 1];
+    int x2 = mutationIndices[idx * MUTATION_INDICES_COUNT + 2];
+    int x3 = mutationIndices[idx * MUTATION_INDICES_COUNT + 3];
+    int x4 = mutationIndices[idx * MUTATION_INDICES_COUNT + 4];
+
+    #define MUTATE() d_trial[(idx*dim)+k] = MUTATION_POINT_ATTR(k) + (F * (d_target[(x1*dim)+k] - d_target[(x2*dim)+k])) + (F * (d_target[(x3*dim)+k] - d_target[(x4*dim)+k]));
+#endif
+
 
     int j;
     int mutateIndx = curand(state) % dim;
-    ///////////////////// MUTATION ////////////////
-    for (int k = 1; k <= dim; k++) {
+
+    ///////////////////// Mutation and Crossover ////////////////
+#if CROSSOVER == CROSSOVER_EXP
+    bool canMutate = true;
+    for (int k = 0; k < dim; k++) {
+        if (canMutate) {
+            MUTATE();
+            canMutate = curand(state) % 1000) >= CR; 
+        } else {
+            d_trial[(idx*dim)+k] = d_target[(idx*dim)+k];
+        }
+    }
+#else
+    for (int k = 0; k < dim; k++) {
         if ((curand(state) % 1000) < CR || k == mutateIndx) {
-            // trial vector param comes from vector plus weighted differential
-            d_trial[(idx*dim)+k] = d_target[(a*dim)+k] + (F * (d_target[(b*dim)+k] - d_target[(c*dim)+k]));
+            MUTATE();
         } else {
             d_trial[(idx*dim)+k] = d_target[(idx*dim)+k];
         } // end if else for creating trial vector
     } // end for loop through parameters
+#endif
 
-    float score = costFunc(&d_trial[idx*dim], costArgs);
+
+    float score = costFunc(&d_trial[idx*dim], costArgs, dim);
     if (score < d_cost[idx]) {
         // copy trial into new vector
         for (j = 0; j < dim; j++) {
@@ -317,13 +444,16 @@ float differentialEvolution(float *d_target,
     int power32 = ceil(popSize / 32.0) * 32;
 
     // Allocate mutation indices
-    size_t *currentMutationIndices, *nextMutationIndices;
-    cudaMalloc(&currentMutationIndices, sizeof(size_t) * popSize * 3);
-    cudaMalloc(&nextMutationIndices, sizeof(size_t) * popSize * 3);
+    int *currentMutationIndices, *nextMutationIndices;
+    cudaMalloc(&currentMutationIndices, sizeof(int) * popSize * MUTATION_INDICES_COUNT);
+    cudaMalloc(&nextMutationIndices, sizeof(int) * popSize * MUTATION_INDICES_COUNT);
 
     cudaStream_t streams[2];
     cudaStreamCreate(&streams[0]);
     cudaStreamCreate(&streams[1]);
+
+    float *bestElement;
+    cudaMalloc(&bestElement, sizeof(float) * dim);
 
     // generate random vector
     generateRandomVectorAndInit<<<1, power32, 0, streams[0]>>>(d_target, d_min, d_max, d_cost,
@@ -331,12 +461,20 @@ float differentialEvolution(float *d_target,
     generateMutationIndices<<<1, power32, 0, streams[1]>>>(popSize, (curandState_t *)randStates, currentMutationIndices);
     gpuErrorCheck(cudaPeekAtLastError());
 
-    for (int i = 1; i <= maxGenerations; i++) {
-        // start kernel for this generation
-        evolutionKernel<<<1, power32, 0, streams[0]>>>(d_target, d_trial, d_cost, d_target2, currentMutationIndices, d_min, d_max,
-                (curandState_t *)randStates, dim, popSize, CR, F, costArgs);
+#if MUTATION_POINT == MUTATION_POINT_BEST
+    findBest<<<1, power32, (sizeof(float) + sizeof(int)) * popSize * 2, streams[0]>>>(d_target, d_cost, popSize, dim, bestElement);
+    gpuErrorCheck(cudaPeekAtLastError());
+#endif
 
+    for (int i = 1; i <= maxGenerations; i++) {
+    #if MUTATION_POINT == MUTATION_POINT_BEST
+        findBest<<<1, power32, (sizeof(float) + sizeof(int)) * popSize * 2, streams[0]>>>(d_target, d_cost, popSize, dim, bestElement);
+    #endif
         generateMutationIndices<<<1, power32, 0, streams[1]>>>(popSize, (curandState_t *)randStates, nextMutationIndices);
+
+        // start kernel for this generation
+       evolutionKernel<<<1, power32, 0, streams[0]>>>(d_target, bestElement, d_trial, d_cost, d_target2, currentMutationIndices, d_min, d_max,
+              (curandState_t *)randStates, dim, popSize, CR, F, costArgs);
 
         gpuErrorCheck(cudaPeekAtLastError());
 
@@ -345,13 +483,14 @@ float differentialEvolution(float *d_target,
         d_target = d_target2;
         d_target2 = tmp_target;
 
-        size_t* tmp_indices = nextMutationIndices;
+        int* tmp_indices = nextMutationIndices;
         nextMutationIndices = currentMutationIndices;
         currentMutationIndices = tmp_indices;
     } // end for (generations)
 
     ret = cudaDeviceSynchronize();
     gpuErrorCheck(ret);
+
     ret = cudaMemcpy(h_cost, d_cost, popSize * sizeof(float), cudaMemcpyDeviceToHost);
     gpuErrorCheck(ret);
 
@@ -374,12 +513,3 @@ void *createRandNumGen(int size)
     gpuErrorCheck(cudaMalloc(&x, sizeof(curandState_t)*size));
     return x;
 }
-
-
-
-
-
-
-
-
-

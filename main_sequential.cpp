@@ -30,38 +30,42 @@
 #include <vector>
 #include <cuda_runtime.h>
 
-std::vector<float> executeDE(const size_t population_size, const size_t generation_count, const size_t dim, float* cost) {
+std::vector<float> executeDE(const size_t population_size, const size_t dim, float* cost) {
     // create the min and max bounds for the search space.
     float minBounds[2] = {-50, -50};
     float maxBounds[2] = {100, 200};
 
-    // a random array or data that gets passed to the cost function.
-    float arr[3] = {2.5, 2.6, 2.7};
-    
     // data that is created in host, then copied to a device version for use with the cost function.
     struct data x;
-    struct data *d_x;
-    gpuErrorCheck(cudaMalloc(&x.arr, sizeof(float) * 3));
-    unsigned long size = sizeof(struct data);
-    gpuErrorCheck(cudaMalloc((void **)&d_x, size));
+
+    // a random array or data that gets passed to the cost function.    
+    x.arr = new float[3]{2.5, 2.6, 2.7};
     x.v = 3;
     x.dim = dim;
-    gpuErrorCheck(cudaMemcpy(x.arr, (void *)&arr, sizeof(float) * 3, cudaMemcpyHostToDevice));
-    
     // Create the minimizer with a popsize of 192, 50 generations, Dimensions = 2, CR = 0.9, F = 2
-    DifferentialEvolution minimizer(population_size, generation_count, 2, 0.9, 0.5, minBounds, maxBounds);
-    
-    gpuErrorCheck(cudaMemcpy(d_x, (void *)&x, sizeof(struct data), cudaMemcpyHostToDevice));
 
-    return minimizer.fmin(d_x, cost);
+    DifferentialEvolution minimizer(population_size,50, 2, 0.9, 0.5, minBounds, maxBounds);
+
+    return minimizer.fmin(&x, cost);
 }
 
-void print_configuration(size_t sample_size, size_t dim, size_t population_size, size_t generations_count) {
+template<typename T>
+void print_vector(std::vector<T> vec, const size_t dim, const char* sep=", ") {
+    for (int i = 0; i < dim; i++) {
+        std::cout << vec[i];
+        if (i < dim - 1) {
+            std::cout << sep;
+        }
+    }
+    std::cout << std::endl;
+}
+
+void print_configuration(size_t sample_size, size_t dim, size_t population_size) {
     std::cout << "Configuration:" << std::endl;
     std::cout << "Population size: " << population_size << std::endl;
     std::cout << "Dimensions: " << dim << std::endl;
-    std::cout << "Generations: " << generations_count << std::endl;
     std::cout << "Run count: " << sample_size << std::endl;
+    std::cout << std::endl;
 
     std::count << "Function: "
     #if COST_SELECTOR == COST_RASTRIGIN
@@ -85,20 +89,9 @@ void print_configuration(size_t sample_size, size_t dim, size_t population_size,
     std::cout << std::endl << std::endl;
 }
 
-template<typename T>
-void print_vector(std::vector<T> vec, const size_t dim, const char* sep=", ") {
-    for (int i = 0; i < dim; i++) {
-        std::cout << vec[i];
-        if (i < dim - 1) {
-            std::cout << sep;
-        }
-    }
-    std::cout << std::endl;
-}
-
 int main(int argc, char** argv)
 {
-    int sample_size = 1;
+    size_t sample_size = 1;
     if (argc > 1) {
         sample_size = atoi(argv[1]);
     }
@@ -113,12 +106,7 @@ int main(int argc, char** argv)
         population_size = atoi(argv[3]);
     }
 
-    size_t generations_count = 50;
-    if (argc > 4) {
-        generations_count = atoi(argv[4]);
-    }
-
-    print_configuration(sample_size, dim, population_size, generations_count);
+    print_configuration(sample_size, dim, population_size);
 
     std::vector<float> result;
     float cost;
@@ -134,7 +122,7 @@ int main(int argc, char** argv)
 
         for (int i = 0; i < sample_size; i++) {
             start = std::chrono::high_resolution_clock::now();
-            result = executeDE(population_size, generations_count, dim, &cost);
+            result = executeDE(population_size, dim, &cost);
             end = std::chrono::high_resolution_clock::now();
             
             std::cout << (end - start).count() << "\t";
@@ -143,7 +131,7 @@ int main(int argc, char** argv)
             print_vector(result, dim, "\t");
         }
     } else {
-        result = executeDE(population_size, generations_count, dim, &cost);
+        result = executeDE(population_size, dim, &cost);
         print_vector(result, dim);
 
         std::cout << "Best cost: " << cost << std::endl;

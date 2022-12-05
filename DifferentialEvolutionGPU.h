@@ -58,6 +58,7 @@
 
 #include "DifferentialEvolution.hpp"
 #include <cuda_runtime.h>
+#include <stdlib.h>
 
 #ifndef __DIFFERENTIAL_EVOLUTION_GPU__
 #define __DIFFERENTIAL_EVOLUTION_GPU__
@@ -67,8 +68,31 @@
 #define MANY_LOCAL_MINMA 2
 #define COST_3D 3
 
+#define COST_RASTRIGIN 4
+#define COST_ROSENBROCK 5
+#define COST_GRIEWANK 6
+#define COST_SPHERE 7
+// Shifted Rastrigin’s Function, Shifted Rosenbrock’s Function, Shifted Griewank’s function, Shifted Sphere’s Function. For
+#define COST_SELECTOR COST_RASTRIGIN
 
-#define COST_SELECTOR COST_WITH_ARGS
+/*--- Customizable functions for implementing different strategies ---*/
+
+// Crossover
+#define CROSSOVER_BIN 1
+#define CROSSOVER_EXP 2
+#define CROSSOVER CROSSOVER_BIN
+
+// Mutation
+#define MUTATION_PARAMS_1 1
+#define MUTATION_PARAMS_2 2
+#define MUTATION_PARAMS MUTATION_PARAMS_1
+
+// Mutation point
+#define MUTATION_POINT_RAND 1
+#define MUTATION_POINT_BEST 2
+#define MUTATION_POINT MUTATION_POINT_RAND
+
+
 
 // A basic macro used to checking cuda errors.
 // @param ans - the most recent enumerated cuda error to check.
