@@ -85,6 +85,8 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
     }
 }
 
+#define PI 3.14159f
+
 // -----------------IMPORTANT----------------
 // costFunc - this function must implement whatever cost function
 // is being minimized.
@@ -108,7 +110,7 @@ float rastriginFunc(const float *vec, const void *args, const int dim)
     float x;
     for (int i = 0; i < dim; i++) {
         x = vec[i];
-        res += x * x + 10 * cos(2 * PI * x);
+        res += x * x - 10 * cos(2 * PI * x);
     }
 
     return res;
@@ -137,7 +139,7 @@ float griewankFunc(const float *vec, const void *args, const int dim)
         x = vec[i];
 
         a += (x * x);
-        b *= cos(x / sqrt(i + 1));
+        b *= cos(x / sqrtf(i + 1));
     }
 
     return a / 4000 - b;
@@ -271,14 +273,14 @@ void mutationAndCrossover(float* population, float* best, int* mutationIndices, 
         int x1 = mutationIndices[idx * MUTATION_INDICES_COUNT + 1];
         int x2 = mutationIndices[idx * MUTATION_INDICES_COUNT + 2];
 
-        #define MUTATE(idx, k) (MUTATION_POINT_ATTR(k) + (F * (population[(x1*dim)+k] - population[(x2*dim)+k])));
+        #define MUTATE(k) (MUTATION_POINT_ATTR(k) + (F * (population[(x1*dim)+k] - population[(x2*dim)+k])));
     #else
         int x1 = mutationIndices[idx * MUTATION_INDICES_COUNT + 1];
         int x2 = mutationIndices[idx * MUTATION_INDICES_COUNT + 2];
         int x3 = mutationIndices[idx * MUTATION_INDICES_COUNT + 3];
         int x4 = mutationIndices[idx * MUTATION_INDICES_COUNT + 4];
 
-        #define MUTATE() (MUTATION_POINT_ATTR(k) + (F * (population[(x1*dim)+k] - population[(x2*dim)+k])) + (F * (population[(x3*dim)+k] - population[(x4*dim)+k])));
+        #define MUTATE(k) (MUTATION_POINT_ATTR(k) + (F * (population[(x1*dim)+k] - population[(x2*dim)+k])) + (F * (population[(x3*dim)+k] - population[(x4*dim)+k])));
     #endif
 
     int mutateIndx = rand() % dim;
@@ -288,7 +290,7 @@ void mutationAndCrossover(float* population, float* best, int* mutationIndices, 
         bool canMutate = true;
         for (int k = 0; k < dim; k++) {
             if (canMutate) {
-                output[idx * dim + k] = MUTATE();
+                output[idx * dim + k] = MUTATE(k);
                 canMutate = rand() % 1000) >= CR; 
             } else {
                 output[idx * dim + k] = population[(idx*dim)+k];
@@ -297,7 +299,7 @@ void mutationAndCrossover(float* population, float* best, int* mutationIndices, 
     #else
         for (int k = 0; k < dim; k++) {
             if ((rand() % 1000) < CR || k == mutateIndx) {
-                output[idx * dim + k] = MUTATE();
+                output[idx * dim + k] = MUTATE(k);
             } else {
                 output[idx * dim + k] = population[(idx*dim)+k];
             } // end if else for creating trial vector
@@ -418,13 +420,19 @@ float differentialEvolution(float *d_target,
     } // end for (generations)
 
     // find min of last evolutions
+    // find min of last evolutions
+    int bestIdx = -1;
     float bestCost = FLT_MAX;
     for (int i = 0; i < popSize; i++) {
         float curCost = d_cost[i];
         if (curCost <= bestCost) {
             bestCost = curCost;
+            bestIdx = i;
         }
     }
+    
+    // output best minimization.
+    std::copy(d_target + bestIdx*dim, d_target + (bestIdx + 1) * dim, h_output);
 
     return bestCost;
 }

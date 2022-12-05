@@ -63,7 +63,7 @@ void print_configuration(size_t sample_size, size_t dim, size_t population_size,
     std::cout << "Generations: " << generations_count << std::endl;
     std::cout << "Run count: " << sample_size << std::endl;
 
-    std::count << "Function: "
+    std::cout << "Function: "
     #if COST_SELECTOR == COST_RASTRIGIN
                << "Rastrigin Function"
     #elif COST_SELECTOR == COST_RASTRIGIN
@@ -126,21 +126,15 @@ int main(int argc, char** argv)
     if (sample_size > 1) {
         std::cout << "Execution results:" << std::endl;
 
-        std::cout << "t" << "\t" << "C" << "\t";
-        for (int i = 0; i < dim; i++) {
-            std::cout << "x_" << i << "\t";
-        }
-        std::cout << std::endl;
+        std::cout << "t (ms)" << "\t" << "C" << std::endl;
 
         for (int i = 0; i < sample_size; i++) {
             start = std::chrono::high_resolution_clock::now();
             result = executeDE(population_size, generations_count, dim, &cost);
             end = std::chrono::high_resolution_clock::now();
+            auto millis = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
             
-            std::cout << (end - start).count() << "\t";
-            std::cout << cost << "\t";
-
-            print_vector(result, dim, "\t");
+            std::cout << millis << "\t" << cost << std::endl;
         }
     } else {
         result = executeDE(population_size, generations_count, dim, &cost);
@@ -151,5 +145,5 @@ int main(int argc, char** argv)
 
     // get the result from the minimizer
     std::cout << "Finished main function." << std::endl;
-    return 1;
+    return 0;
 }

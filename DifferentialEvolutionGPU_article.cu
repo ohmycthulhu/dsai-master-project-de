@@ -80,8 +80,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
     if (code != cudaSuccess)
     {
         fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-        // TODO: Revert
-//        exit(code);
+        exit(code);
     }
 }
 
@@ -110,7 +109,7 @@ __host__ __device__ float rastriginFunc(const float *vec, const void *args, cons
     float x;
     for (int i = 0; i < dim; i++) {
         x = vec[i];
-        res += x * x + 10 * cos(2 * PI * x);
+        res += x * x - 10 * cos(2 * PI * x);
     }
 
     return res;
@@ -139,10 +138,10 @@ __host__ __device__ float griewankFunc(const float *vec, const void *args, const
         x = vec[i];
 
         a += (x * x);
-        b *= cos(x / sqrt(i + 1));
+        b *= cos(x / sqrtf(i + 1));
     }
 
-    return a / 4000 - b;
+    return a / 4000 - b + 1;
 }
 
 // Shifted Sphere’s Function
@@ -232,6 +231,8 @@ __global__ void generateMutationIndices(
         int* output
 ) {
     int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    if (idx >= popSize) return;
 
     curandState_t *state = &randStates[idx];
 
@@ -459,13 +460,12 @@ float differentialEvolution(float *d_target,
     generateRandomVectorAndInit<<<1, power32, 0, streams[0]>>>(d_target, d_min, d_max, d_cost,
                     costArgs, (curandState_t *)randStates, popSize, dim, clock());
     generateMutationIndices<<<1, power32, 0, streams[1]>>>(popSize, (curandState_t *)randStates, currentMutationIndices);
-    gpuErrorCheck(cudaPeekAtLastError());
 
 #if MUTATION_POINT == MUTATION_POINT_BEST
     findBest<<<1, power32, (sizeof(float) + sizeof(int)) * popSize * 2, streams[0]>>>(d_target, d_cost, popSize, dim, bestElement);
-    gpuErrorCheck(cudaPeekAtLastError());
 #endif
 
+    gpuErrorCheck(cudaDeviceSynchronize());
     for (int i = 1; i <= maxGenerations; i++) {
     #if MUTATION_POINT == MUTATION_POINT_BEST
         findBest<<<1, power32, (sizeof(float) + sizeof(int)) * popSize * 2, streams[0]>>>(d_target, d_cost, popSize, dim, bestElement);
@@ -476,7 +476,7 @@ float differentialEvolution(float *d_target,
        evolutionKernel<<<1, power32, 0, streams[0]>>>(d_target, bestElement, d_trial, d_cost, d_target2, currentMutationIndices, d_min, d_max,
               (curandState_t *)randStates, dim, popSize, CR, F, costArgs);
 
-        gpuErrorCheck(cudaPeekAtLastError());
+        gpuErrorCheck(cudaDeviceSynchronize());
 
         // swap buffers, places newest data into d_target.
         float *tmp_target = d_target;
@@ -488,20 +488,23 @@ float differentialEvolution(float *d_target,
         currentMutationIndices = tmp_indices;
     } // end for (generations)
 
-    ret = cudaDeviceSynchronize();
-    gpuErrorCheck(ret);
-
     ret = cudaMemcpy(h_cost, d_cost, popSize * sizeof(float), cudaMemcpyDeviceToHost);
     gpuErrorCheck(ret);
 
     // find min of last evolutions
+    int bestIdx = -1;
     float bestCost = FLT_MAX;
     for (int i = 0; i < popSize; i++) {
         float curCost = h_cost[i];
         if (curCost <= bestCost) {
             bestCost = curCost;
+            bestIdx = i;
         }
     }
+    
+    // output best minimization.
+    ret = cudaMemcpy(h_output, d_target+(bestIdx*dim), sizeof(float)*dim, cudaMemcpyDeviceToHost);
+    gpuErrorCheck(ret);
 
     return bestCost;
 }
