@@ -30,7 +30,7 @@
 #include <vector>
 #include <cuda_runtime.h>
 
-std::vector<float> executeDE(const size_t population_size, const size_t generation_count, const size_t dim, float* cost) {
+DifferentialEvolution prepareDE(const size_t population_size, const size_t generation_count, const size_t dim, struct data *d_x) {
     // create the min and max bounds for the search space.
     float minBounds[2] = {-50, -50};
     float maxBounds[2] = {100, 200};
@@ -40,10 +40,7 @@ std::vector<float> executeDE(const size_t population_size, const size_t generati
     
     // data that is created in host, then copied to a device version for use with the cost function.
     struct data x;
-    struct data *d_x;
     gpuErrorCheck(cudaMalloc(&x.arr, sizeof(float) * 3));
-    unsigned long size = sizeof(struct data);
-    gpuErrorCheck(cudaMalloc((void **)&d_x, size));
     x.v = 3;
     x.dim = dim;
     gpuErrorCheck(cudaMemcpy(x.arr, (void *)&arr, sizeof(float) * 3, cudaMemcpyHostToDevice));
@@ -53,7 +50,7 @@ std::vector<float> executeDE(const size_t population_size, const size_t generati
     
     gpuErrorCheck(cudaMemcpy(d_x, (void *)&x, sizeof(struct data), cudaMemcpyHostToDevice));
 
-    return minimizer.fmin(d_x, cost);
+    return minimizer;
 }
 
 void print_configuration(size_t sample_size, size_t dim, size_t population_size, size_t generations_count) {
@@ -123,21 +120,27 @@ int main(int argc, char** argv)
     std::vector<float> result;
     float cost;
     std::chrono::time_point<std::chrono::system_clock> start, end;
+
+    struct data* d_x;
+    gpuErrorCheck(cudaMalloc((void **)&d_x, sizeof(struct data)));
+
     if (sample_size > 1) {
         std::cout << "Execution results:" << std::endl;
 
         std::cout << "t (ms)" << "\t" << "C" << std::endl;
 
         for (int i = 0; i < sample_size; i++) {
+            DifferentialEvolution algorithm = prepareDE(population_size, generations_count, dim, d_x);
             start = std::chrono::high_resolution_clock::now();
-            result = executeDE(population_size, generations_count, dim, &cost);
+            result = algorithm.fmin(d_x, &cost);
             end = std::chrono::high_resolution_clock::now();
             auto millis = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
             
             std::cout << millis << "\t" << cost << std::endl;
         }
     } else {
-        result = executeDE(population_size, generations_count, dim, &cost);
+        DifferentialEvolution algorithm = prepareDE(population_size, generations_count, dim, d_x);
+        result = algorithm.fmin(d_x, &cost);
         print_vector(result, dim);
 
         std::cout << "Best cost: " << cost << std::endl;
@@ -147,3 +150,4 @@ int main(int argc, char** argv)
     std::cout << "Finished main function." << std::endl;
     return 0;
 }
+

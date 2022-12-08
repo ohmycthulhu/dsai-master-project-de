@@ -30,23 +30,17 @@
 #include <vector>
 #include <cuda_runtime.h>
 
-std::vector<float> executeDE(const size_t population_size, const size_t dim, float* cost) {
+DifferentialEvolution prepareDE(const size_t population_size, const size_t generations_count, const size_t dim, struct data* x) {
     // create the min and max bounds for the search space.
     float minBounds[2] = {-50, -50};
     float maxBounds[2] = {100, 200};
 
-    // data that is created in host, then copied to a device version for use with the cost function.
-    struct data x;
-
     // a random array or data that gets passed to the cost function.    
-    x.arr = new float[3]{2.5, 2.6, 2.7};
-    x.v = 3;
-    x.dim = dim;
-    // Create the minimizer with a popsize of 192, 50 generations, Dimensions = 2, CR = 0.9, F = 2
+    x->arr = new float[3]{2.5, 2.6, 2.7};
+    x->v = 3;
+    x->dim = dim;
 
-    DifferentialEvolution minimizer(population_size,50, 2, 0.9, 0.5, minBounds, maxBounds);
-
-    return minimizer.fmin(&x, cost);
+    return DifferentialEvolution(population_size,50, 2, 0.9, 0.5, minBounds, maxBounds);
 }
 
 template<typename T>
@@ -60,7 +54,7 @@ void print_vector(std::vector<T> vec, const size_t dim, const char* sep=", ") {
     std::cout << std::endl;
 }
 
-void print_configuration(size_t sample_size, size_t dim, size_t population_size) {
+void print_configuration(size_t sample_size, size_t dim, size_t population_size, size_t generations_count) {
     std::cout << "Configuration:" << std::endl;
     std::cout << "Population size: " << population_size << std::endl;
     std::cout << "Dimensions: " << dim << std::endl;
@@ -106,10 +100,16 @@ int main(int argc, char** argv)
         population_size = atoi(argv[3]);
     }
 
-    print_configuration(sample_size, dim, population_size);
+    size_t generations_count = 50;
+    if (argc > 4) {
+        generations_count = atoi(argv[4]);
+    }
+
+    print_configuration(sample_size, dim, population_size, generations_count);
 
     std::vector<float> result;
     float cost;
+    struct data x;
     std::chrono::time_point<std::chrono::system_clock> start, end;
     if (sample_size > 1) {
         std::cout << "Execution results:" << std::endl;
@@ -117,15 +117,17 @@ int main(int argc, char** argv)
         std::cout << "t (ms)" << "\t" << "C" << std::endl;
 
         for (int i = 0; i < sample_size; i++) {
+            DifferentialEvolution algorithm = prepareDE(population_size, generations_count, dim, &x);
             start = std::chrono::high_resolution_clock::now();
-            result = executeDE(population_size, generations_count, dim, &cost);
+            result = algorithm.fmin(&x, &cost);
             end = std::chrono::high_resolution_clock::now();
             auto millis = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
  
             std::cout << millis << "\t" << cost << std::endl;
         }
     } else {
-        result = executeDE(population_size, dim, &cost);
+        DifferentialEvolution algorithm = prepareDE(population_size, generations_count, dim, &x);
+        result = algorithm.fmin(&x, &cost);
         print_vector(result, dim);
 
         std::cout << "Best cost: " << cost << std::endl;

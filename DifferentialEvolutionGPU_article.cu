@@ -354,14 +354,14 @@ __global__ void evolutionKernel(float *d_target,
     int x1 = mutationIndices[idx * MUTATION_INDICES_COUNT + 1];
     int x2 = mutationIndices[idx * MUTATION_INDICES_COUNT + 2];
 
-    #define MUTATE() d_trial[(idx*dim)+k] = MUTATION_POINT_ATTR(k) + (F * (d_target[(x1*dim)+k] - d_target[(x2*dim)+k]));
+    #define MUTATE(k) MUTATION_POINT_ATTR(k) + (F * (d_target[(x1*dim)+k] - d_target[(x2*dim)+k]));
 #else
     int x1 = mutationIndices[idx * MUTATION_INDICES_COUNT + 1];
     int x2 = mutationIndices[idx * MUTATION_INDICES_COUNT + 2];
     int x3 = mutationIndices[idx * MUTATION_INDICES_COUNT + 3];
     int x4 = mutationIndices[idx * MUTATION_INDICES_COUNT + 4];
 
-    #define MUTATE() d_trial[(idx*dim)+k] = MUTATION_POINT_ATTR(k) + (F * (d_target[(x1*dim)+k] - d_target[(x2*dim)+k])) + (F * (d_target[(x3*dim)+k] - d_target[(x4*dim)+k]));
+    #define MUTATE(k) MUTATION_POINT_ATTR(k) + (F * (d_target[(x1*dim)+k] - d_target[(x2*dim)+k])) + (F * (d_target[(x3*dim)+k] - d_target[(x4*dim)+k]));
 #endif
 
 
@@ -373,8 +373,8 @@ __global__ void evolutionKernel(float *d_target,
     bool canMutate = true;
     for (int k = 0; k < dim; k++) {
         if (canMutate) {
-            MUTATE();
-            canMutate = curand(state) % 1000) >= CR; 
+            d_trial[(idx*dim)+k] = MUTATE(k);
+            canMutate = (curand(state) % 1000) >= CR; 
         } else {
             d_trial[(idx*dim)+k] = d_target[(idx*dim)+k];
         }
@@ -382,7 +382,7 @@ __global__ void evolutionKernel(float *d_target,
 #else
     for (int k = 0; k < dim; k++) {
         if ((curand(state) % 1000) < CR || k == mutateIndx) {
-            MUTATE();
+            d_trial[(idx*dim)+k] = MUTATE(k);
         } else {
             d_trial[(idx*dim)+k] = d_target[(idx*dim)+k];
         } // end if else for creating trial vector

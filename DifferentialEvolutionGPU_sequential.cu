@@ -142,7 +142,7 @@ float griewankFunc(const float *vec, const void *args, const int dim)
         b *= cos(x / sqrtf(i + 1));
     }
 
-    return a / 4000 - b;
+    return a / 4000 - b + 1;
 }
 
 // Shifted Sphere’s Function
@@ -291,7 +291,7 @@ void mutationAndCrossover(float* population, float* best, int* mutationIndices, 
         for (int k = 0; k < dim; k++) {
             if (canMutate) {
                 output[idx * dim + k] = MUTATE(k);
-                canMutate = rand() % 1000) >= CR; 
+                canMutate = (rand() % 1000) >= CR; 
             } else {
                 output[idx * dim + k] = population[(idx*dim)+k];
             }
