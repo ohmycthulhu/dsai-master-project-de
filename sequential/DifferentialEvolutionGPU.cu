@@ -18,43 +18,10 @@
 */
 
 // DifferentialEvolutionGPU.cu
-// This file holds the GPU kernel functions required to run differential evolution.
-// The software in this files is based on the paper:
-// Differential Evolution - A Simple and Efficient Heuristic for Global Optimization over Continous Spaces,
-// Rainer Storn, Kenneth Price (1996)
+// This file holds the CPU implementation for kernel functions required to run differential evolution.
 //
-// But is extended upon for use with GPU's for faster computation times.
-// This has been done previously in the paper:
-// Differential evolution algorithm on the GPU with C-CUDA
-// Lucas de P. Veronese, Renato A. Krohling (2010)
-// However this implementation is only vaguly based on their implementation.
-// Translation: I saw that the paper existed, and figured that they probably
-// implemented the code in a similar way to how I was going to implement it.
-// Brief read-through seemed to be the same way.
-//
-// The paralization in this software is done by using multiple cuda threads for each
-// agent in the algorithm. If using smaller population sizes, (4 - 31) this will probably
-// not give significant if any performance gains. However large population sizes are more
-// likly to give performance gains.
-//
-// HOW TO USE:
-// To implement a new cost function write the cost function in DifferentialEvolutionGPU.cu with the header
-// float fooCost(const float *vec, const void *args)
-// @param vec - sample parameters for the cost function to give a score on.
-// @param args - any set of arguements that can be passed at the minimization stage
-// NOTE: args any memory given to the function must already be in device memory.
-//
-// Go to the header and add a specifier for your cost functiona and change the COST_SELECTOR
-// to that specifier. (please increment from previous number)
-//
-// Once you have a cost function find the costFunc function, and add into
-// preprocessor directives switch statement
-//
-// ...
-// #elif COST_SELECTOR == YOUR_COST_FUNCTION_SPECIFIER
-//      return yourCostFunctionName(vec, args);
-// ...
-//
+// This version is made also to support different strategies: random | best for point selection, 1 | 2 differences
+// and bin | exp crossover functions. 
 
 // for random numbers in a kernel
 #include "../DifferentialEvolutionGPU.h"
@@ -90,19 +57,15 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
 // -----------------IMPORTANT----------------
 // costFunc - this function must implement whatever cost function
 // is being minimized.
-// Feel free to delete all code in here.
-// This is a bit of a hack and not elegant at all. The issue is that
-// CUDA doesn't support function passing device code between host
-// software. There is a possibilty of using virtual functions, but
-// was concerned that the polymorphic function have a lot of overhead
-// So instead use this super ugly method for changing the cost function.
+// It's an optimization tactic to avoid constant choosing the evaluation function.
+// We define all possible functions and then use preprocessor directives to select the evaluation function.
 //
 // @param vec - the vector to be evaulated.
 // @param args - a set of user arguments.
 // @param dim - number of dimensions.
 
 // Functions:
-// Shifted Rastrigin’s Function
+// Rastrigin’s Function
 float rastriginFunc(const float *vec, const void *args, const int dim)
 {
     float res = 10 * dim;
@@ -116,7 +79,7 @@ float rastriginFunc(const float *vec, const void *args, const int dim)
     return res;
 }
 
-// Shifted Rosenbrock’s Function
+// Rosenbrock’s Function
 float rosenblockFunc(const float *vec, const void *args, const int dim)
 {
     float res = 0;
@@ -129,7 +92,7 @@ float rosenblockFunc(const float *vec, const void *args, const int dim)
     return res;
 }
 
-// Shifted Griewank’s function
+// Griewank’s function
 float griewankFunc(const float *vec, const void *args, const int dim)
 {
     float a = 1, b = 1; 
@@ -145,7 +108,7 @@ float griewankFunc(const float *vec, const void *args, const int dim)
     return a / 4000 - b + 1;
 }
 
-// Shifted Sphere’s Function
+// Sphere’s Function
 float sphereFunc(const float *vec, const void *args, const int dim)
 {
     float res = 0;
@@ -190,6 +153,7 @@ float costFunc(const float *vec, const void *args, const int dim) {
     #define MUTATION_INDICES_COUNT 5
 #endif
 
+// Function for generating and evaluating the initial population.
 void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_max,
             float *d_cost, void *costArgs,
             int popSize, int dim, unsigned long seed)
@@ -209,9 +173,8 @@ void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_max,
 }
 
 /*
- * Generates 3 non-equal indices for usage in the mutation
+ * Generates MUTATION_INDICES_COUNT non-equal indices for usage in the mutation
  * @param popSize - the population size
- * @param randStates - an array of random number generator states. Array created using createRandNumGen function
  * @param output - a device array used for output
  */
 void generateMutationIndices(
@@ -261,6 +224,16 @@ void findBest(float* population, float* costs, int popSize, int dim, float* outp
     }
 }
 
+// Function that performs mutation and crossover of a single individual
+// It'll apply the selected strategy and change the function based on that.
+// @param population - an array of population.
+// @param best - the best individual in the population.
+// @param mutationIndices - mutation indices.
+// @param idx - individual index.
+// @param dim - number of dimensions.
+// @param CR - crossover rate, from 0 to 1000 (will be divided by 10^3).
+// @param F - mutation factor.
+// @param output - an output array of population.
 void mutationAndCrossover(float* population, float* best, int* mutationIndices, int idx, int dim, int CR, float F, float* output) {
     #if MUTATION_POINT == MUTATION_POINT_BEST
         #define MUTATION_POINT_ATTR(i) best[i]
@@ -307,7 +280,7 @@ void mutationAndCrossover(float* population, float* best, int* mutationIndices, 
     #endif
 }
 
-// This function handles the entire differentialEvolution, and calls the needed kernel functions.
+// This function handles the entire differentialEvolution, except for mutation indices generation, and calls the needed kernel functions.
 // @param d_target - a device array with the current agents parameters (requires array with size popSize*dim)
 // @param d_best - a device array with the current best element
 // @param d_trial - a device array with size popSize*dim (worthless outside of function)
@@ -316,7 +289,6 @@ void mutationAndCrossover(float* population, float* best, int* mutationIndices, 
 // @param mutationIndices - a device array with indices for mutation
 // @param d_min - a list of the minimum values for the set of parameters (size = dim)
 // @param d_max - a list of the maximum values for the set of parameters (size = dim)
-// @param randStates - an array of random number generator states. Array created using createRandNumGen function
 // @param dim - the number of dimensions the equation being minimized has.
 // @param popSize - this the population size for DE, or otherwise the number of agents that DE will use. (see DE paper for more info)
 // @param CR - Crossover Constant used by DE (see DE paper for more info)
@@ -341,15 +313,14 @@ void evolutionKernel(float *d_target,
     for (idx = 0; idx < popSize; idx++) {
         mutationAndCrossover(d_target, d_best, mutationIndices, idx, dim, CR, F, d_trial);
 
+        // Evaluate the cost and replace if new score is less than the existing
         float score = costFunc(&d_trial[idx*dim], costArgs, dim);
         if (score < d_cost[idx]) {
-            // copy trial into new vector
             for (j = 0; j < dim; j++) {
                 d_target2[(idx*dim) + j] = d_trial[(idx*dim) + j];
             }
             d_cost[idx] = score;
         } else {
-            // copy target to the second vector
             for (j = 0; j < dim; j++) {
                 d_target2[(idx*dim) + j] = d_target[(idx*dim) + j];
             }
@@ -419,7 +390,6 @@ float differentialEvolution(float *d_target,
         d_target2 = tmp_target;
     } // end for (generations)
 
-    // find min of last evolutions
     // find min of last evolutions
     int bestIdx = -1;
     float bestCost = FLT_MAX;

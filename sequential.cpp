@@ -18,9 +18,9 @@
  */
 
 //
-//  testMain.cpp
+//  sequentila.cpp
 //
-// This is a test code to show an example usage of Differential Evolution
+// This is a code to run sequential version of DE and print the results.
 
 #include <stdio.h>
 
@@ -30,6 +30,7 @@
 #include <vector>
 #include <cuda_runtime.h>
 
+// creates an algorithm instance
 DifferentialEvolution prepareDE(const size_t population_size, const size_t generations_count, const size_t dim, struct data* x) {
     // create the min and max bounds for the search space.
     float minBounds[2] = {-50, -50};
@@ -54,6 +55,7 @@ void print_vector(std::vector<T> vec, const size_t dim, const char* sep=", ") {
     std::cout << std::endl;
 }
 
+// print the passed configuration
 void print_configuration(size_t sample_size, size_t dim, size_t population_size, size_t generations_count) {
     std::cout << "Configuration:" << std::endl;
     std::cout << "Population size: " << population_size << std::endl;
@@ -86,6 +88,7 @@ void print_configuration(size_t sample_size, size_t dim, size_t population_size,
 
 int main(int argc, char** argv)
 {
+    // read and interpret the arguments
     size_t sample_size = 1;
     if (argc > 1) {
         sample_size = atoi(argv[1]);
@@ -106,16 +109,19 @@ int main(int argc, char** argv)
         generations_count = atoi(argv[4]);
     }
 
+    // display the current configuration
     print_configuration(sample_size, dim, population_size, generations_count);
 
     std::vector<float> result;
     float cost;
     struct data x;
-    std::chrono::time_point<std::chrono::system_clock> start, end;
+    
+    // If sample_size > 1, run the algorithm multiple times 
     if (sample_size > 1) {
+        std::chrono::time_point<std::chrono::system_clock> start, end;
         std::cout << "Execution results:" << std::endl;
 
-        std::cout << "t (ms)" << "\t" << "C" << std::endl;
+        std::cout << "t (mcs)" << "\t" << "C" << std::endl;
 
         for (int i = 0; i < sample_size; i++) {
             DifferentialEvolution algorithm = prepareDE(population_size, generations_count, dim, &x);

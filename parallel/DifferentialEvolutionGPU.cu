@@ -20,42 +20,11 @@
 // DifferentialEvolutionGPU.cu
 // This file holds the GPU kernel functions required to run differential evolution.
 // The software in this files is based on the paper:
-// Differential Evolution - A Simple and Efficient Heuristic for Global Optimization over Continous Spaces,
-// Rainer Storn, Kenneth Price (1996)
+// Differential Evolution - An Improved CUDA-Based Implementation of Differential Evolution on GPU,
+// A. K. Qin, Federico Raimondo, Florence Forbes (2012)
 //
-// But is extended upon for use with GPU's for faster computation times.
-// This has been done previously in the paper:
-// Differential evolution algorithm on the GPU with C-CUDA
-// Lucas de P. Veronese, Renato A. Krohling (2010)
-// However this implementation is only vaguly based on their implementation.
-// Translation: I saw that the paper existed, and figured that they probably
-// implemented the code in a similar way to how I was going to implement it.
-// Brief read-through seemed to be the same way.
-//
-// The paralization in this software is done by using multiple cuda threads for each
-// agent in the algorithm. If using smaller population sizes, (4 - 31) this will probably
-// not give significant if any performance gains. However large population sizes are more
-// likly to give performance gains.
-//
-// HOW TO USE:
-// To implement a new cost function write the cost function in DifferentialEvolutionGPU.cu with the header
-// __device float fooCost(const float *vec, const void *args)
-// @param vec - sample parameters for the cost function to give a score on.
-// @param args - any set of arguements that can be passed at the minimization stage
-// NOTE: args any memory given to the function must already be in device memory.
-//
-// Go to the header and add a specifier for your cost functiona and change the COST_SELECTOR
-// to that specifier. (please increment from previous number)
-//
-// Once you have a cost function find the costFunc function, and add into
-// preprocessor directives switch statement
-//
-// ...
-// #elif COST_SELECTOR == YOUR_COST_FUNCTION_SPECIFIER
-//      return yourCostFunctionName(vec, args);
-// ...
-//
-
+// This version is made also to support different strategies: random | best for point selection, 1 | 2 differences
+// and bin | exp crossover functions. 
 
 #include <curand_kernel.h>
 
@@ -101,7 +70,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
 // @param dim - number of dimensions.
 
 // Functions:
-// Shifted Rastrigin’s Function
+// Rastrigin’s Function
 __host__ __device__ float rastriginFunc(const float *vec, const void *args, const int dim)
 {
     float res = 10 * dim;
@@ -115,7 +84,7 @@ __host__ __device__ float rastriginFunc(const float *vec, const void *args, cons
     return res;
 }
 
-// Shifted Rosenbrock’s Function
+// Rosenbrock’s Function
 __host__ __device__ float rosenblockFunc(const float *vec, const void *args, const int dim)
 {
     float res = 0;
@@ -128,7 +97,7 @@ __host__ __device__ float rosenblockFunc(const float *vec, const void *args, con
     return res;
 }
 
-// Shifted Griewank’s function
+// Griewank’s function
 __host__ __device__ float griewankFunc(const float *vec, const void *args, const int dim)
 {
     float a = 1, b = 1; 
@@ -144,7 +113,7 @@ __host__ __device__ float griewankFunc(const float *vec, const void *args, const
     return a / 4000 - b + 1;
 }
 
-// Shifted Sphere’s Function
+// Sphere’s Function
 __host__ __device__ float sphereFunc(const float *vec, const void *args, const int dim)
 {
     float res = 0;
@@ -203,6 +172,7 @@ void printCudaVector(T *d_vec, int size)
     delete[] h_vec;
 }
 
+// Kernel for generating and evaluating the initial population.
 __global__ void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_max,
             float *d_cost, void *costArgs, curandState_t *randStates,
             int popSize, int dim, unsigned long seed)
@@ -220,7 +190,7 @@ __global__ void generateRandomVectorAndInit(float *d_x, float *d_min, float *d_m
 }
 
 /*
- * Generates 3 non-equal indices for usage in the mutation
+ * Generates MUTATION_INDICES_COUNT non-equal indices for usage in the mutation
  * @param popSize - the population size
  * @param randStates - an array of random number generator states. Array created using createRandNumGen function
  * @param output - a device array used for output
@@ -261,6 +231,8 @@ __global__ void generateMutationIndices(
     #endif
 }
 
+// Kernel for finding the best individual in the population.
+// 
 __global__ void findBest(float* population, float* cost, int popSize, int dim, float* output) {
     extern __shared__ float m_costs[];
     extern __shared__ int m_best_indices[];
@@ -277,6 +249,7 @@ __global__ void findBest(float* population, float* cost, int popSize, int dim, f
 
     __syncthreads();
 
+    // Each individual compares 2*idx with 2*idx + 1 and moves the bigger cost index to idx
     int t_1, t_2, t_best = 0;
     for (int i = popSize; i > 1; i = (i % 2) + (i / 2)) {
         t_1 = 2 * idx;
@@ -299,6 +272,7 @@ __global__ void findBest(float* population, float* cost, int popSize, int dim, f
         __syncthreads();
     }
 
+    // At the end, idx = 0 holds the biggest index.
     if (idx == 0) {
         int bestIndex = m_best_indices[0];
         for (int i = 0; i < dim; i++) {
@@ -343,6 +317,7 @@ __global__ void evolutionKernel(float *d_target,
     
     curandState_t *state = &randStates[idx];
 
+    // Define mutation functions
 #if MUTATION_POINT == MUTATION_POINT_BEST
     #define MUTATION_POINT_ATTR(i) d_best[i]
 #else    
@@ -368,15 +343,17 @@ __global__ void evolutionKernel(float *d_target,
     int j;
     int mutateIndx = curand(state) % dim;
 
+    // Depending on the
     ///////////////////// Mutation and Crossover ////////////////
 #if CROSSOVER == CROSSOVER_EXP
     bool canMutate = true;
-    for (int k = 0; k < dim; k++) {
+    j = curand(state) % dim;
+    for (int k = 0; k < dim; k++, j = (j + 1) % dim) {
         if (canMutate) {
-            d_trial[(idx*dim)+k] = MUTATE(k);
+            d_trial[(idx*dim)+j] = MUTATE(j);
             canMutate = (curand(state) % 1000) >= CR; 
         } else {
-            d_trial[(idx*dim)+k] = d_target[(idx*dim)+k];
+            d_trial[(idx*dim)+j] = d_target[(idx*dim)+j];
         }
     }
 #else
@@ -467,9 +444,11 @@ float differentialEvolution(float *d_target,
 
     gpuErrorCheck(cudaDeviceSynchronize());
     for (int i = 1; i <= maxGenerations; i++) {
+        // find the best individual if the corresponding strategy is selected.
     #if MUTATION_POINT == MUTATION_POINT_BEST
         findBest<<<1, power32, (sizeof(float) + sizeof(int)) * popSize * 2, streams[0]>>>(d_target, d_cost, popSize, dim, bestElement);
     #endif
+        // generate mutation indices for the next iteration
         generateMutationIndices<<<1, power32, 0, streams[1]>>>(popSize, (curandState_t *)randStates, nextMutationIndices);
 
         // start kernel for this generation
