@@ -40,7 +40,7 @@ DifferentialEvolution prepareDE(const size_t population_size, const size_t gener
     x->v = 3;
     x->dim = dim;
 
-    return DifferentialEvolution(population_size,50, 2, 0.9, 0.5, minBounds, maxBounds);
+    return DifferentialEvolution(population_size, generations_count, 2, 0.9, 0.5, minBounds, maxBounds);
 }
 
 template<typename T>
@@ -58,6 +58,7 @@ void print_configuration(size_t sample_size, size_t dim, size_t population_size,
     std::cout << "Configuration:" << std::endl;
     std::cout << "Population size: " << population_size << std::endl;
     std::cout << "Dimensions: " << dim << std::endl;
+    std::cout << "Generations: " << generations_count << std::endl;
     std::cout << "Run count: " << sample_size << std::endl;
     std::cout << std::endl;
 
@@ -137,3 +138,4 @@ int main(int argc, char** argv)
     std::cout << "Finished main function." << std::endl;
     return 0;
 }
+

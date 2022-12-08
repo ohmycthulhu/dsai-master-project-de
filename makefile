@@ -1,8 +1,8 @@
-gpu:
-	nvcc -o programGPU main.cpp DifferentialEvolution.cpp DifferentialEvolutionGPU_article.cu
+parallel: parallel.cpp DifferentialEvolution.hpp DifferentialEvolutionGPU.h parallel/*
+	nvcc -o de_parallel parallel.cpp parallel/DifferentialEvolution.cpp parallel/DifferentialEvolutionGPU.cu
 
-sequential:
-	nvcc -o programSequential main_sequential.cpp DifferentialEvolution_sequential.cpp DifferentialEvolutionGPU_sequential.cu
+sequential: sequential.cpp DifferentialEvolution.hpp DifferentialEvolutionGPU.h sequential/*
+	nvcc -o de_sequential sequential.cpp sequential/DifferentialEvolution.cpp sequential/DifferentialEvolutionGPU.cu
 
 clean:
-	rm programGPU programSequential
+	rm de_parallel de_sequential

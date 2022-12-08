@@ -137,3 +137,4 @@ float differentialEvolution(float *d_target,
 void *createRandNumGen(int size);
 
 #endif
+
