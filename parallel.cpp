@@ -133,7 +133,7 @@ int main(int argc, char** argv)
     if (sample_size > 1) {
         std::cout << "Execution results:" << std::endl;
 
-        std::cout << "t (ms)" << "\t" << "C" << std::endl;
+        std::cout << "t (μs)" << "\t" << "C" << std::endl;
 
         for (int i = 0; i < sample_size; i++) {
             DifferentialEvolution algorithm = prepareDE(population_size, generations_count, dim, d_x);

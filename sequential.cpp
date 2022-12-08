@@ -121,7 +121,7 @@ int main(int argc, char** argv)
         std::chrono::time_point<std::chrono::system_clock> start, end;
         std::cout << "Execution results:" << std::endl;
 
-        std::cout << "t (mcs)" << "\t" << "C" << std::endl;
+        std::cout << "t (μs)" << "\t" << "C" << std::endl;
 
         for (int i = 0; i < sample_size; i++) {
             DifferentialEvolution algorithm = prepareDE(population_size, generations_count, dim, &x);
