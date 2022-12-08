@@ -30,6 +30,8 @@
 #include <vector>
 #include <cuda_runtime.h>
 
+
+// creates an algorithm instance
 DifferentialEvolution prepareDE(const size_t population_size, const size_t generation_count, const size_t dim, struct data *d_x) {
     // create the min and max bounds for the search space.
     float minBounds[2] = {-50, -50};
@@ -53,6 +55,7 @@ DifferentialEvolution prepareDE(const size_t population_size, const size_t gener
     return minimizer;
 }
 
+// print the passed configuration
 void print_configuration(size_t sample_size, size_t dim, size_t population_size, size_t generations_count) {
     std::cout << "Configuration:" << std::endl;
     std::cout << "Population size: " << population_size << std::endl;
@@ -95,6 +98,7 @@ void print_vector(std::vector<T> vec, const size_t dim, const char* sep=", ") {
 
 int main(int argc, char** argv)
 {
+    // read and interpret the arguments
     int sample_size = 1;
     if (argc > 1) {
         sample_size = atoi(argv[1]);
@@ -115,6 +119,7 @@ int main(int argc, char** argv)
         generations_count = atoi(argv[4]);
     }
 
+    // display the current configuration
     print_configuration(sample_size, dim, population_size, generations_count);
 
     std::vector<float> result;
@@ -124,6 +129,7 @@ int main(int argc, char** argv)
     struct data* d_x;
     gpuErrorCheck(cudaMalloc((void **)&d_x, sizeof(struct data)));
 
+    // If sample_size > 1, run the algorithm multiple times 
     if (sample_size > 1) {
         std::cout << "Execution results:" << std::endl;
 

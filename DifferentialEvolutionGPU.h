@@ -63,16 +63,11 @@
 #ifndef __DIFFERENTIAL_EVOLUTION_GPU__
 #define __DIFFERENTIAL_EVOLUTION_GPU__
 
-#define QUADRATIC_COST 0
-#define COST_WITH_ARGS 1
-#define MANY_LOCAL_MINMA 2
-#define COST_3D 3
-
 #define COST_RASTRIGIN 4
 #define COST_ROSENBROCK 5
 #define COST_GRIEWANK 6
 #define COST_SPHERE 7
-// Shifted Rastrigin’s Function, Shifted Rosenbrock’s Function, Shifted Griewank’s function, Shifted Sphere’s Function. For
+// Rastrigin’s Function, Rosenbrock’s Function, Griewank’s function, Sphere’s Function. For
 #define COST_SELECTOR COST_RASTRIGIN
 
 /*--- Customizable functions for implementing different strategies ---*/
